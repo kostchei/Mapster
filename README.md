@@ -63,18 +63,23 @@ python -m http.server 8080
 
 - Grayscale map rendering (black/white style)
 - Flat-top hex overlay
-- Default `6 mile` hex spacing
+- Fixed `6 mile` hex spacing
 - Low-ink black/white render tuned for printing
 - Two view modes:
 - `GM`: no fog of war (full map, full marker visibility)
 - `Player`: fog of war active
 - Terrain rendering is assembled per gameplay hex from `Examples/Hexs/subhexes` assets (not from full-size source map labels)
 - Coast/water detection uses a downsampled hydro mask built from the original color atlas, then water hexes are forced from mask coverage (major water + channels/coastline)
+- Sub-map extent is constrained to your selected `Extent.png` area
 - Player hex states:
 - `Unknown` hexes: white (hidden)
 - `Visited` hexes: same map shown but paler, with dotted outline
-- `Visible` hexes: full-contrast black/white map with solid black outline (fixed sight radius `3`)
+- `Visible` hexes: full-contrast black/white map (fixed sight radius `3`)
+- Hex grid lines are gray dotted
 - Pan/zoom camera
-- Adjustable hex size in miles
 - Optional marker overlay (shown only in visible hexes)
 - Exploration state saved in `localStorage`
+- Player pins:
+- Add pin with `Add player pin` button, then click a hex
+- Pins are saved in `localStorage`
+- App starts fully zoomed in on the most recent pin

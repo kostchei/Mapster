@@ -1,14 +1,22 @@
 const SQRT3 = Math.sqrt(3);
 const SIGHT_RADIUS = 3;
+const HEX_MILES = 6;
+const PLAYER_PIN_STORAGE_KEY = "mapster_player_pins";
+const SUBMAP_BBOX = {
+  x: 3839,
+  y: 1351,
+  w: 4090,
+  h: 1537
+};
 
 const canvas = document.getElementById("mapCanvas");
 const ctx = canvas.getContext("2d");
 
-const hexMilesInput = document.getElementById("hexMiles");
 const viewModeSelect = document.getElementById("viewMode");
 const showHexInput = document.getElementById("showHex");
 const showMarkersInput = document.getElementById("showMarkers");
 const resetViewButton = document.getElementById("resetView");
+const addPinButton = document.getElementById("addPin");
 const clearFogButton = document.getElementById("clearFog");
 const resetFogButton = document.getElementById("resetFog");
 const meta = document.getElementById("meta");
@@ -137,14 +145,31 @@ let currentHex = null;
 let markerOverrideCache = new Map();
 let terrainTypeCache = new Map();
 let renderQueued = false;
+let playerPins = [];
+let addPinMode = false;
 
 function currentMode() {
   return viewModeSelect.value === "gm" ? "gm" : "player";
 }
 
 function hexSizePx() {
-  const miles = Number(hexMilesInput.value) || 6;
-  return (miles * components.scale.pixelsPerMile) / 1.5;
+  return (HEX_MILES * components.scale.pixelsPerMile) / 1.5;
+}
+
+function isInsideSubmap(x, y) {
+  return (
+    x >= SUBMAP_BBOX.x &&
+    y >= SUBMAP_BBOX.y &&
+    x <= SUBMAP_BBOX.x + SUBMAP_BBOX.w &&
+    y <= SUBMAP_BBOX.y + SUBMAP_BBOX.h
+  );
+}
+
+function clampToSubmap(x, y) {
+  return {
+    x: Math.max(SUBMAP_BBOX.x, Math.min(SUBMAP_BBOX.x + SUBMAP_BBOX.w, x)),
+    y: Math.max(SUBMAP_BBOX.y, Math.min(SUBMAP_BBOX.y + SUBMAP_BBOX.h, y))
+  };
 }
 
 function axialToPixel(q, r, size) {
@@ -818,26 +843,9 @@ function drawGridStroke(corners, state, mode) {
     return;
   }
   beginPathFromPoints(corners);
-  if (mode === "gm") {
-    ctx.strokeStyle = "#111";
-    ctx.lineWidth = 1 / camera.zoom;
-    ctx.setLineDash([]);
-    ctx.stroke();
-    return;
-  }
-  if (state === "visible") {
-    ctx.strokeStyle = "#111";
-    ctx.lineWidth = 1.4 / camera.zoom;
-    ctx.setLineDash([]);
-  } else if (state === "visited") {
-    ctx.strokeStyle = "#777";
-    ctx.lineWidth = 1 / camera.zoom;
-    ctx.setLineDash([3 / camera.zoom, 3 / camera.zoom]);
-  } else {
-    ctx.strokeStyle = "#ddd";
-    ctx.lineWidth = 1 / camera.zoom;
-    ctx.setLineDash([]);
-  }
+  ctx.strokeStyle = "#787878";
+  ctx.lineWidth = state === "visible" ? 1.2 / camera.zoom : 1 / camera.zoom;
+  ctx.setLineDash([2.6 / camera.zoom, 4.2 / camera.zoom]);
   ctx.stroke();
   ctx.setLineDash([]);
 }
@@ -858,6 +866,9 @@ function drawTerrainHexes(bounds, visibleSet, mode) {
         center.x > mapW + margin ||
         center.y > mapH + margin
       ) {
+        continue;
+      }
+      if (!isInsideSubmap(center.x, center.y)) {
         continue;
       }
 
@@ -908,10 +919,13 @@ function drawMarkers(bounds, visibleSet, mode) {
   ctx.fillStyle = "#fff";
   ctx.strokeStyle = "#111";
   ctx.lineWidth = 1 / camera.zoom;
-  ctx.font = `${12 / camera.zoom}px Georgia, serif`;
+  ctx.font = `${14 / camera.zoom}px Georgia, serif`;
 
   for (const marker of components.markers) {
     if (marker.x < bounds.xMin || marker.x > bounds.xMax || marker.y < bounds.yMin || marker.y > bounds.yMax) {
+      continue;
+    }
+    if (!isInsideSubmap(marker.x, marker.y)) {
       continue;
     }
 
@@ -928,10 +942,45 @@ function drawMarkers(bounds, visibleSet, mode) {
     ctx.stroke();
 
     if (camera.zoom > 0.34) {
-      ctx.fillStyle = "#111";
+      ctx.fillStyle = "#8b4a32";
       ctx.fillText(marker.name, marker.x + 7 / camera.zoom, marker.y - 7 / camera.zoom);
       ctx.fillStyle = "#fff";
     }
+  }
+}
+
+function drawPlayerPins(bounds, visibleSet, mode) {
+  if (!playerPins.length) {
+    return;
+  }
+  const size = hexSizePx();
+  ctx.lineWidth = 1 / camera.zoom;
+  ctx.font = `${15 / camera.zoom}px Georgia, serif`;
+
+  for (const pin of playerPins) {
+    if (pin.x < bounds.xMin || pin.x > bounds.xMax || pin.y < bounds.yMin || pin.y > bounds.yMax) {
+      continue;
+    }
+    if (!isInsideSubmap(pin.x, pin.y)) {
+      continue;
+    }
+    if (mode === "player") {
+      const h = worldToHex(pin.x, pin.y, size);
+      if (!visibleSet.has(hexKey(h.q, h.r))) {
+        continue;
+      }
+    }
+
+    ctx.beginPath();
+    ctx.arc(pin.x, pin.y, 5 / camera.zoom, 0, Math.PI * 2);
+    ctx.fillStyle = "#8b4a32";
+    ctx.fill();
+    ctx.strokeStyle = "#2b120a";
+    ctx.stroke();
+
+    ctx.fillStyle = "#8b4a32";
+    const label = pin.label || `Pin`;
+    ctx.fillText(label, pin.x + 9 / camera.zoom, pin.y - 8 / camera.zoom);
   }
 }
 
@@ -960,19 +1009,20 @@ function render() {
   const visibleSet = mode === "player" ? buildVisibleSet() : new Set();
   drawTerrainHexes(bounds, visibleSet, mode);
   drawMarkers(bounds, visibleSet, mode);
+  drawPlayerPins(bounds, visibleSet, mode);
 
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
 
 function fitView() {
-  const mapW = components.map.imageW;
-  const mapH = components.map.imageH;
+  const mapW = SUBMAP_BBOX.w;
+  const mapH = SUBMAP_BBOX.h;
   const fitZoom = Math.min(viewportW / mapW, viewportH / mapH);
   camera.minZoom = Math.max(fitZoom * 0.5, 0.02);
   camera.maxZoom = 4;
   camera.zoom = fitZoom;
-  camera.panX = (viewportW - mapW * fitZoom) / 2;
-  camera.panY = (viewportH - mapH * fitZoom) / 2;
+  camera.panX = (viewportW - mapW * fitZoom) / 2 - SUBMAP_BBOX.x * fitZoom;
+  camera.panY = (viewportH - mapH * fitZoom) / 2 - SUBMAP_BBOX.y * fitZoom;
   queueRender();
 }
 
@@ -987,7 +1037,13 @@ function resizeCanvas() {
 
 function setCurrentHexAtScreen(sx, sy) {
   const world = screenToWorld(sx, sy);
-  if (world.x < 0 || world.y < 0 || world.x > components.map.imageW || world.y > components.map.imageH) {
+  if (
+    world.x < 0 ||
+    world.y < 0 ||
+    world.x > components.map.imageW ||
+    world.y > components.map.imageH ||
+    !isInsideSubmap(world.x, world.y)
+  ) {
     return;
   }
   const hex = worldToHex(world.x, world.y, hexSizePx());
@@ -998,9 +1054,46 @@ function setCurrentHexAtScreen(sx, sy) {
   queueRender();
 }
 
+function makePinLabel(idx) {
+  return `Pin ${idx}`;
+}
+
+function addPlayerPinAtScreen(sx, sy) {
+  const world = screenToWorld(sx, sy);
+  if (!isInsideSubmap(world.x, world.y)) {
+    addPinMode = false;
+    return;
+  }
+
+  const size = hexSizePx();
+  const h = worldToHex(world.x, world.y, size);
+  const p = axialToPixel(h.q, h.r, size);
+  const c = clampToSubmap(p.x, p.y);
+  const ts = new Date().toISOString();
+
+  const pin = {
+    x: c.x,
+    y: c.y,
+    q: h.q,
+    r: h.r,
+    label: makePinLabel(playerPins.length + 1),
+    createdAt: ts
+  };
+  playerPins.push(pin);
+  savePlayerPins();
+
+  currentHex = { q: h.q, r: h.r };
+  visitedHexes.add(hexKey(h.q, h.r));
+  saveExploration();
+
+  addPinMode = false;
+  addPinButton.textContent = "Add player pin";
+  updateMeta();
+  queueRender();
+}
+
 function explorationStorageKey() {
-  const miles = Number(hexMilesInput.value) || 6;
-  return `mapster_explore_${components.map.mapId}_${miles}`;
+  return `mapster_explore_${components.map.mapId}_${HEX_MILES}`;
 }
 
 function saveExploration() {
@@ -1026,6 +1119,49 @@ function loadExploration() {
     visitedHexes = new Set();
     currentHex = null;
   }
+}
+
+function savePlayerPins() {
+  localStorage.setItem(PLAYER_PIN_STORAGE_KEY, JSON.stringify(playerPins));
+}
+
+function loadPlayerPins() {
+  const raw = localStorage.getItem(PLAYER_PIN_STORAGE_KEY);
+  if (!raw) {
+    playerPins = [];
+    return;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      playerPins = [];
+      return;
+    }
+    playerPins = parsed
+      .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))
+      .map((p, idx) => ({
+        x: p.x,
+        y: p.y,
+        q: Number.isFinite(p.q) ? p.q : worldToHex(p.x, p.y, hexSizePx()).q,
+        r: Number.isFinite(p.r) ? p.r : worldToHex(p.x, p.y, hexSizePx()).r,
+        label: p.label || makePinLabel(idx + 1),
+        createdAt: p.createdAt || null
+      }));
+  } catch {
+    playerPins = [];
+  }
+}
+
+function focusMostRecentPin() {
+  if (!playerPins.length) {
+    return false;
+  }
+  const recent = playerPins[playerPins.length - 1];
+  const zoom = camera.maxZoom;
+  camera.zoom = zoom;
+  camera.panX = viewportW / 2 - recent.x * zoom;
+  camera.panY = viewportH / 2 - recent.y * zoom;
+  return true;
 }
 
 function uiStorageKey() {
@@ -1054,7 +1190,7 @@ function updateMeta() {
   const mode = currentMode().toUpperCase();
   const pxPerMile = components.scale.pixelsPerMile.toFixed(3);
   const milesPerPx = components.scale.milesPerPixel.toFixed(6);
-  const hexMiles = Number(hexMilesInput.value) || 6;
+  const hexMiles = HEX_MILES;
   const size = hexSizePx();
   const currentLabel = currentHex ? `${currentHex.q},${currentHex.r}` : "none";
   meta.innerHTML = [
@@ -1064,6 +1200,7 @@ function updateMeta() {
     `Hex center spacing: ${hexMiles} miles`,
     `Sight: ${SIGHT_RADIUS} hexes`,
     `Visited: ${visitedHexes.size}`,
+    `Player pins: ${playerPins.length}`,
     `Current hex: ${currentLabel}`
   ].join("<br>");
 }
@@ -1102,7 +1239,11 @@ function setupInteractions() {
       return;
     }
     if (interaction.dragMode === "set-current" && !interaction.moved && event.button === 0) {
-      setCurrentHexAtScreen(event.clientX, event.clientY);
+      if (addPinMode) {
+        addPlayerPinAtScreen(event.clientX, event.clientY);
+      } else {
+        setCurrentHexAtScreen(event.clientX, event.clientY);
+      }
     }
     interaction.dragging = false;
     interaction.dragMode = "none";
@@ -1130,13 +1271,6 @@ function setupInteractions() {
 }
 
 function setupUi() {
-  hexMilesInput.addEventListener("change", () => {
-    loadExploration();
-    clearClassificationCaches();
-    updateMeta();
-    queueRender();
-  });
-
   viewModeSelect.addEventListener("change", () => {
     saveUiPrefs();
     updateMeta();
@@ -1147,6 +1281,10 @@ function setupUi() {
   showMarkersInput.addEventListener("change", queueRender);
 
   resetViewButton.addEventListener("click", fitView);
+  addPinButton.addEventListener("click", () => {
+    addPinMode = !addPinMode;
+    addPinButton.textContent = addPinMode ? "Click map to place pin" : "Add player pin";
+  });
 
   clearFogButton.addEventListener("click", () => {
     visitedHexes = new Set();
@@ -1161,6 +1299,10 @@ function setupUi() {
   resetFogButton.addEventListener("click", () => {
     visitedHexes = new Set();
     currentHex = null;
+    playerPins = [];
+    savePlayerPins();
+    addPinMode = false;
+    addPinButton.textContent = "Add player pin";
     saveExploration();
     updateMeta();
     queueRender();
@@ -1239,7 +1381,11 @@ async function boot() {
   setupUi();
   loadUiPrefs();
   loadExploration();
+  loadPlayerPins();
   clearClassificationCaches();
+  if (!focusMostRecentPin()) {
+    fitView();
+  }
   updateMeta();
   queueRender();
 }
