@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="220" viewBox="0 0 240 220">
+  <rect x="0" y="0" width="240" height="220" fill="#fff"/>
+  <polygon points="212.00,110.00 166.00,189.67 74.00,189.67 28.00,110.00 74.00,30.33 166.00,30.33" fill="#fff" stroke="#111" stroke-width="2"/>
+  <g clip-path="url(#clipHex)">
+    
+  <rect x="30" y="45" width="180" height="130" fill="#fafafa"/>
+  <g stroke="#111" stroke-width="1.4" fill="none"><path d="M 36 72 C 50 60, 64 60, 78 72 C 92 84, 106 84, 120 72 C 134 60, 148 60, 162 72 C 176 84, 190 84, 204 72"/>
+<path d="M 36 98 C 50 86, 64 86, 78 98 C 92 110, 106 110, 120 98 C 134 86, 148 86, 162 98 C 176 110, 190 110, 204 98"/>
+<path d="M 36 124 C 50 112, 64 112, 78 124 C 92 136, 106 136, 120 124 C 134 112, 148 112, 162 124 C 176 136, 190 136, 204 124"/>
+<path d="M 36 150 C 50 138, 64 138, 78 150 C 92 162, 106 162, 120 150 C 134 138, 148 138, 162 150 C 176 162, 190 162, 204 150"/></g>
+  </g>
+  <polygon points="212.00,110.00 166.00,189.67 74.00,189.67 28.00,110.00 74.00,30.33 166.00,30.33" fill="none" stroke="#111" stroke-width="2"/>
+  <text x="120" y="208" font-family="Segoe UI, Arial, sans-serif" font-size="13" text-anchor="middle" fill="#111">Water v1</text>
+  <defs>
+    <clipPath id="clipHex">
+      <polygon points="212.00,110.00 166.00,189.67 74.00,189.67 28.00,110.00 74.00,30.33 166.00,30.33"/>
+    </clipPath>
+  </defs>
+</svg>

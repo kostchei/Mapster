@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="220" viewBox="0 0 240 220">
+  <rect x="0" y="0" width="240" height="220" fill="#fff"/>
+  <polygon points="212.00,110.00 166.00,189.67 74.00,189.67 28.00,110.00 74.00,30.33 166.00,30.33" fill="#fff" stroke="#111" stroke-width="2"/>
+  <g clip-path="url(#clipHex)">
+    
+  <rect x="30" y="45" width="180" height="130" fill="#f7f7f7"/>
+  <g stroke="#111" stroke-width="1.4" fill="#fff"><polygon points="62,130 74,100 86,130"/>
+<polygon points="84,138 98,104 112,138"/>
+<polygon points="112,132 126,96 140,132"/>
+<polygon points="138,140 154,100 170,140"/>
+<polygon points="52,98 66,66 80,98"/>
+<polygon points="84,96 100,62 116,96"/>
+<polygon points="120,98 136,64 152,98"/>
+<polygon points="152,102 166,72 180,102"/></g>
+  <g stroke="#111" stroke-width="1.2"><line x1="74" y1="130" x2="74" y2="142"/>
+<line x1="98" y1="138" x2="98" y2="150"/>
+<line x1="126" y1="132" x2="126" y2="144"/>
+<line x1="154" y1="140" x2="154" y2="152"/>
+<line x1="66" y1="98" x2="66" y2="110"/></g>
+  </g>
+  <polygon points="212.00,110.00 166.00,189.67 74.00,189.67 28.00,110.00 74.00,30.33 166.00,30.33" fill="none" stroke="#111" stroke-width="2"/>
+  <text x="120" y="208" font-family="Segoe UI, Arial, sans-serif" font-size="13" text-anchor="middle" fill="#111">Forest v1</text>
+  <defs>
+    <clipPath id="clipHex">
+      <polygon points="212.00,110.00 166.00,189.67 74.00,189.67 28.00,110.00 74.00,30.33 166.00,30.33"/>
+    </clipPath>
+  </defs>
+</svg>

@@ -1,0 +1,85 @@
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #ffffff;
+  color: #111;
+  font-family: "Segoe UI", Tahoma, sans-serif;
+}
+
+#mapCanvas {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  cursor: crosshair;
+}
+
+#ui {
+  position: fixed;
+  left: 12px;
+  top: 12px;
+  width: 260px;
+  z-index: 100;
+  padding: 10px 12px;
+  border: 1px solid #111;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+#ui .row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+#ui .buttons {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+#ui input[type="number"] {
+  width: 78px;
+  border: 1px solid #222;
+  padding: 2px 4px;
+}
+
+#ui button {
+  border: 1px solid #111;
+  background: #fff;
+  color: #111;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+#ui button:hover {
+  background: #111;
+  color: #fff;
+}
+
+#meta {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+#hint {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #333;
+}
+
+@media print {
+  #ui {
+    display: none;
+  }
+
+  html,
+  body,
+  #mapCanvas {
+    background: #ffffff !important;
+  }
+}

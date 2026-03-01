@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mapster Hex Explorer</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div id="ui">
+    <div class="row">
+      <strong>Faerun Hex Explore</strong>
+    </div>
+    <div class="row">
+      <label for="hexMiles">Hex miles</label>
+      <input id="hexMiles" type="number" min="3" max="120" step="1" value="6">
+    </div>
+    <div class="row">
+      <label for="viewMode">View mode</label>
+      <select id="viewMode">
+        <option value="player">Player</option>
+        <option value="gm">GM</option>
+      </select>
+    </div>
+    <div class="row">
+      <span>Sight radius</span>
+      <strong>3 hexes</strong>
+    </div>
+    <div class="row">
+      <label for="showHex">Show grid</label>
+      <input id="showHex" type="checkbox" checked>
+    </div>
+    <div class="row">
+      <label for="showMarkers">Show markers</label>
+      <input id="showMarkers" type="checkbox">
+    </div>
+    <div class="row buttons">
+      <button id="resetView">Reset view</button>
+      <button id="clearFog">Clear trail</button>
+      <button id="resetFog">Reset explore</button>
+    </div>
+    <div id="meta"></div>
+    <div id="hint">Left click: set current hex. Right drag: pan. Mouse wheel: zoom.</div>
+  </div>
+
+  <canvas id="mapCanvas"></canvas>
+  <script src="./main.js" type="module"></script>
+</body>
+</html>
