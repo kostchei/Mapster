@@ -1,7 +1,10 @@
 const SQRT3 = Math.sqrt(3);
 const SIGHT_RADIUS = 3;
 const HEX_MILES = 6;
-const PLAYER_PIN_STORAGE_KEY = "mapster_player_pins";
+const PLAYER_POI_STORAGE_KEY = "mapster_player_pois";
+const GM_POI_STORAGE_KEY = "mapster_gm_pois";
+const LEGACY_PLAYER_PIN_STORAGE_KEY = "mapster_player_pins";
+const LEGACY_GM_PIN_STORAGE_KEY = "mapster_gm_pin";
 const SUBMAP_BBOX = {
   x: 3839,
   y: 1351,
@@ -13,10 +16,12 @@ const canvas = document.getElementById("mapCanvas");
 const ctx = canvas.getContext("2d");
 
 const viewModeSelect = document.getElementById("viewMode");
-const showHexInput = document.getElementById("showHex");
 const showMarkersInput = document.getElementById("showMarkers");
 const resetViewButton = document.getElementById("resetView");
-const addPinButton = document.getElementById("addPin");
+const addPlayerPinButton = document.getElementById("addPlayerPin");
+const removePlayerPinButton = document.getElementById("removePlayerPin");
+const addGmPinButton = document.getElementById("addGmPin");
+const removeGmPinButton = document.getElementById("removeGmPin");
 const clearFogButton = document.getElementById("clearFog");
 const resetFogButton = document.getElementById("resetFog");
 const meta = document.getElementById("meta");
@@ -146,10 +151,14 @@ let visitedHexes = new Set();
 let currentHex = null;
 let markerOverrideCache = new Map();
 let markerHexCache = new Map();
+let playerPoiHexCache = new Map();
+let gmPoiHexCache = new Map();
 let terrainTypeCache = new Map();
 let renderQueued = false;
-let playerPins = [];
-let addPinMode = false;
+let playerPois = [];
+let gmPois = [];
+let addPinMode = null;
+let removePinMode = null;
 let discoveredSpecialHexes = new Set();
 const hoverState = {
   inside: false,
@@ -387,7 +396,9 @@ function rebuildMarkerOverrideCache() {
     existingMarkers.push({
       name: marker.name || "Unnamed marker",
       category: marker.category || "Uncategorized",
-      text: htmlToPlainText(marker.textHtml || marker.imageHtml || "")
+      text: htmlToPlainText(marker.textHtml || marker.imageHtml || ""),
+      url: "",
+      source: "map"
     });
     markerHexCache.set(key, existingMarkers);
 
@@ -403,6 +414,76 @@ function rebuildMarkerOverrideCache() {
   }
 }
 
+function normalizePoiText(text) {
+  if (text == null) {
+    return "";
+  }
+  return String(text).trim();
+}
+
+function normalizePoiUrl(url) {
+  const raw = String(url || "").trim();
+  if (!raw) {
+    return "";
+  }
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) {
+    return raw;
+  }
+  return `https://${raw}`;
+}
+
+function buildPoiFromRaw(raw, idx, fallbackPrefix) {
+  if (!raw || !Number.isFinite(raw.x) || !Number.isFinite(raw.y)) {
+    return null;
+  }
+  const h =
+    Number.isFinite(raw.q) && Number.isFinite(raw.r)
+      ? { q: raw.q, r: raw.r }
+      : worldToHex(raw.x, raw.y, hexSizePx());
+  return {
+    x: raw.x,
+    y: raw.y,
+    q: h.q,
+    r: h.r,
+    name: normalizePoiText(raw.name || raw.label) || `${fallbackPrefix} ${idx + 1}`,
+    category: normalizePoiText(raw.category) || "User POI",
+    text: normalizePoiText(raw.text),
+    url: normalizePoiUrl(raw.url),
+    createdAt: raw.createdAt || null
+  };
+}
+
+function rebuildUserPoiCaches() {
+  playerPoiHexCache = new Map();
+  gmPoiHexCache = new Map();
+
+  for (const poi of playerPois) {
+    const key = hexKey(poi.q, poi.r);
+    const list = playerPoiHexCache.get(key) || [];
+    list.push(poi);
+    playerPoiHexCache.set(key, list);
+  }
+
+  for (const poi of gmPois) {
+    const key = hexKey(poi.q, poi.r);
+    const list = gmPoiHexCache.get(key) || [];
+    list.push(poi);
+    gmPoiHexCache.set(key, list);
+  }
+}
+
+function dedupePoisByHex(pois) {
+  const byHex = new Map();
+  for (const poi of pois) {
+    const key = hexKey(poi.q, poi.r);
+    if (byHex.has(key)) {
+      byHex.delete(key);
+    }
+    byHex.set(key, poi);
+  }
+  return Array.from(byHex.values());
+}
+
 function escapeHtml(text) {
   return String(text)
     .replaceAll("&", "&amp;")
@@ -415,6 +496,32 @@ function escapeHtml(text) {
 function hideHoverInfo() {
   hoverInfo.style.display = "none";
   hoverInfo.innerHTML = "";
+}
+
+function renderPoiRow(poi) {
+  const parts = [
+    `<div class="row">`,
+    `<div class="name">${escapeHtml(poi.name)}</div>`,
+    `<div class="cat">${escapeHtml(poi.category)}</div>`
+  ];
+  if (poi.text) {
+    parts.push(`<div class="text">${escapeHtml(poi.text)}</div>`);
+  }
+  if (poi.url) {
+    parts.push(`<div class="url">${escapeHtml(poi.url)}</div>`);
+  }
+  parts.push(`</div>`);
+  return parts.join("");
+}
+
+function renderPoiTier(title, entries) {
+  if (!entries.length) {
+    return "";
+  }
+  return [
+    `<div class="tier">${escapeHtml(title)}</div>`,
+    entries.map((entry) => renderPoiRow(entry)).join("")
+  ].join("");
 }
 
 function updateHoverInfoAtScreen(sx, sy) {
@@ -437,13 +544,8 @@ function updateHoverInfoAtScreen(sx, sy) {
 
   const h = worldToHex(world.x, world.y, hexSizePx());
   const key = hexKey(h.q, h.r);
-  const markers = markerHexCache.get(key) || [];
-  if (!markers.length) {
-    hideHoverInfo();
-    return;
-  }
-
-  if (currentMode() === "player") {
+  const mode = currentMode();
+  if (mode === "player") {
     const visibleSet = buildVisibleSet();
     const isKnown = visitedHexes.has(key) || visibleSet.has(key);
     if (!isKnown) {
@@ -452,18 +554,19 @@ function updateHoverInfoAtScreen(sx, sy) {
     }
   }
 
-  const rows = markers
-    .map((marker) => {
-      return [
-        `<div class="row">`,
-        `<div class="name">${escapeHtml(marker.name)}</div>`,
-        `<div class="cat">${escapeHtml(marker.category)}</div>`,
-        `</div>`
-      ].join("");
-    })
-    .join("");
+  const mapPois = markerHexCache.get(key) || [];
+  const playerAddedPois = playerPoiHexCache.get(key) || [];
+  const gmAddedPois = mode === "gm" ? gmPoiHexCache.get(key) || [] : [];
+  if (!mapPois.length && !playerAddedPois.length && !gmAddedPois.length) {
+    hideHoverInfo();
+    return;
+  }
 
-  hoverInfo.innerHTML = rows;
+  hoverInfo.innerHTML = [
+    renderPoiTier("Map POIs", mapPois),
+    renderPoiTier("Player-added POIs", playerAddedPois),
+    renderPoiTier("GM-added POIs", gmAddedPois)
+  ].join("");
   hoverInfo.style.display = "block";
 
   const rect = hoverInfo.getBoundingClientRect();
@@ -496,6 +599,7 @@ function refreshHoverInfo() {
 function clearClassificationCaches() {
   terrainTypeCache = new Map();
   rebuildMarkerOverrideCache();
+  rebuildUserPoiCaches();
 }
 
 function sampleColor(x, y) {
@@ -991,9 +1095,6 @@ function drawTypedTerrain(corners, center, size, type, q, r, state) {
 }
 
 function drawGridStroke(corners, state, mode) {
-  if (!showHexInput.checked) {
-    return;
-  }
   beginPathFromPoints(corners);
   ctx.strokeStyle = "#787878";
   ctx.lineWidth = state === "visible" ? 1.2 / camera.zoom : 1 / camera.zoom;
@@ -1065,7 +1166,12 @@ function drawTerrainHexes(bounds, visibleSet, mode) {
 function drawMarkers(bounds, visibleSet, mode) {
   const showMarkerDots = showMarkersInput.checked;
   const size = hexSizePx();
-  ctx.font = `700 ${14 / camera.zoom}px Georgia, serif`;
+  const referenceZoom = camera.maxZoom || 1;
+  const screenScale = Math.sqrt(camera.zoom / referenceZoom);
+  const labelFontPx = (14 * screenScale) / camera.zoom;
+  const labelOffset = (7 * screenScale) / camera.zoom;
+  const haloWidth = (3.2 * screenScale) / camera.zoom;
+  ctx.font = `700 ${labelFontPx}px Georgia, serif`;
 
   for (const marker of components.markers) {
     if (marker.x < bounds.xMin || marker.x > bounds.xMax || marker.y < bounds.yMin || marker.y > bounds.yMax) {
@@ -1093,10 +1199,10 @@ function drawMarkers(bounds, visibleSet, mode) {
       ctx.stroke();
     }
 
-    const tx = marker.x + 7 / camera.zoom;
-    const ty = marker.y - 7 / camera.zoom;
+    const tx = marker.x + labelOffset;
+    const ty = marker.y - labelOffset;
     ctx.strokeStyle = "#fff";
-    ctx.lineWidth = 3.2 / camera.zoom;
+    ctx.lineWidth = haloWidth;
     ctx.lineJoin = "round";
     ctx.miterLimit = 2;
     ctx.strokeText(marker.name, tx, ty);
@@ -1106,38 +1212,60 @@ function drawMarkers(bounds, visibleSet, mode) {
   }
 }
 
-function drawPlayerPins(bounds, visibleSet, mode) {
-  if (!playerPins.length) {
-    return;
-  }
-  const size = hexSizePx();
+function drawUserPoi(poi, fillColor, strokeColor, labelColor) {
+  ctx.save();
   ctx.lineWidth = 1 / camera.zoom;
-  ctx.font = `${15 / camera.zoom}px Georgia, serif`;
+  ctx.font = `700 ${14 / camera.zoom}px Georgia, serif`;
 
-  for (const pin of playerPins) {
-    if (pin.x < bounds.xMin || pin.x > bounds.xMax || pin.y < bounds.yMin || pin.y > bounds.yMax) {
+  ctx.beginPath();
+  ctx.moveTo(poi.x, poi.y + 5.5 / camera.zoom);
+  ctx.lineTo(poi.x, poi.y + 13 / camera.zoom);
+  ctx.strokeStyle = strokeColor;
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(poi.x, poi.y, 5.5 / camera.zoom, 0, Math.PI * 2);
+  ctx.fillStyle = fillColor;
+  ctx.fill();
+  ctx.strokeStyle = strokeColor;
+  ctx.stroke();
+
+  ctx.fillStyle = labelColor;
+  ctx.fillText(poi.name, poi.x + 9 / camera.zoom, poi.y - 8 / camera.zoom);
+  ctx.restore();
+}
+
+function drawPlayerPois(bounds, visibleSet, mode) {
+  const size = hexSizePx();
+  for (const poi of playerPois) {
+    if (poi.x < bounds.xMin || poi.x > bounds.xMax || poi.y < bounds.yMin || poi.y > bounds.yMax) {
       continue;
     }
-    if (!isInsideSubmap(pin.x, pin.y)) {
+    if (!isInsideSubmap(poi.x, poi.y)) {
       continue;
     }
     if (mode === "player") {
-      const h = worldToHex(pin.x, pin.y, size);
-      if (!visibleSet.has(hexKey(h.q, h.r))) {
+      const key = hexKey(poi.q, poi.r);
+      if (!visibleSet.has(key) && !visitedHexes.has(key)) {
         continue;
       }
     }
+    drawUserPoi(poi, "#8b4a32", "#2b120a", "#8b4a32");
+  }
+}
 
-    ctx.beginPath();
-    ctx.arc(pin.x, pin.y, 5 / camera.zoom, 0, Math.PI * 2);
-    ctx.fillStyle = "#8b4a32";
-    ctx.fill();
-    ctx.strokeStyle = "#2b120a";
-    ctx.stroke();
-
-    ctx.fillStyle = "#8b4a32";
-    const label = pin.label || `Pin`;
-    ctx.fillText(label, pin.x + 9 / camera.zoom, pin.y - 8 / camera.zoom);
+function drawGmPois(bounds, mode) {
+  if (mode !== "gm") {
+    return;
+  }
+  for (const poi of gmPois) {
+    if (poi.x < bounds.xMin || poi.x > bounds.xMax || poi.y < bounds.yMin || poi.y > bounds.yMax) {
+      continue;
+    }
+    if (!isInsideSubmap(poi.x, poi.y)) {
+      continue;
+    }
+    drawUserPoi(poi, "#2a7dff", "#0d3f91", "#0d3f91");
   }
 }
 
@@ -1166,7 +1294,8 @@ function render() {
   const visibleSet = mode === "player" ? buildVisibleSet() : new Set();
   drawTerrainHexes(bounds, visibleSet, mode);
   drawMarkers(bounds, visibleSet, mode);
-  drawPlayerPins(bounds, visibleSet, mode);
+  drawPlayerPois(bounds, visibleSet, mode);
+  drawGmPois(bounds, mode);
 
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
@@ -1213,14 +1342,27 @@ function setCurrentHexAtScreen(sx, sy) {
   queueRender();
 }
 
-function makePinLabel(idx) {
-  return `Pin ${idx}`;
+function promptPoiDetails(kind, defaultName) {
+  const label = kind === "gm" ? "GM pin" : "Player pin";
+  const nameRaw = window.prompt(`${label} name`, defaultName);
+  if (nameRaw === null) {
+    return null;
+  }
+  const textRaw = window.prompt(`${label} notes/description (optional)`, "") || "";
+  const urlRaw = window.prompt(`${label} URL (optional)`, "") || "";
+  return {
+    name: normalizePoiText(nameRaw) || defaultName,
+    text: normalizePoiText(textRaw),
+    url: normalizePoiUrl(urlRaw)
+  };
 }
 
-function addPlayerPinAtScreen(sx, sy) {
+function addUserPoiAtScreen(sx, sy, kind) {
   const world = screenToWorld(sx, sy);
   if (!isInsideSubmap(world.x, world.y)) {
-    addPinMode = false;
+    addPinMode = null;
+    removePinMode = null;
+    syncPinUi();
     return;
   }
 
@@ -1229,25 +1371,88 @@ function addPlayerPinAtScreen(sx, sy) {
   const p = axialToPixel(h.q, h.r, size);
   const c = clampToSubmap(p.x, p.y);
   const ts = new Date().toISOString();
+  const targetList = kind === "gm" ? gmPois : playerPois;
+  const defaultName = kind === "gm" ? `GM Pin ${targetList.length + 1}` : `Player Pin ${targetList.length + 1}`;
+  const details = promptPoiDetails(kind, defaultName);
+  if (!details) {
+    addPinMode = null;
+    removePinMode = null;
+    syncPinUi();
+    return;
+  }
 
-  const pin = {
+  const poi = {
     x: c.x,
     y: c.y,
     q: h.q,
     r: h.r,
-    label: makePinLabel(playerPins.length + 1),
+    name: details.name,
+    category: kind === "gm" ? "GM Added POI" : "Player Added POI",
+    text: details.text,
+    url: details.url,
     createdAt: ts
   };
-  playerPins.push(pin);
-  savePlayerPins();
 
-  currentHex = { q: h.q, r: h.r };
-  revealFromHex(currentHex);
-  markSpecialHexesFromCenter(currentHex);
-  saveExploration();
+  const existingIdx = targetList.findIndex((entry) => entry.q === h.q && entry.r === h.r);
+  if (existingIdx >= 0) {
+    targetList[existingIdx] = poi;
+  } else {
+    targetList.push(poi);
+  }
+  rebuildUserPoiCaches();
+  saveUserPois();
 
-  addPinMode = false;
-  addPinButton.textContent = "Add player pin";
+  if (kind === "player") {
+    currentHex = { q: h.q, r: h.r };
+    revealFromHex(currentHex);
+    markSpecialHexesFromCenter(currentHex);
+    saveExploration();
+  }
+
+  addPinMode = null;
+  removePinMode = null;
+  syncPinUi();
+  updateMeta();
+  refreshHoverInfo();
+  queueRender();
+}
+
+function removeUserPoiAtScreen(sx, sy, kind) {
+  const world = screenToWorld(sx, sy);
+  if (!isInsideSubmap(world.x, world.y)) {
+    removePinMode = null;
+    syncPinUi();
+    return;
+  }
+
+  const size = hexSizePx();
+  const h = worldToHex(world.x, world.y, size);
+  const targetList = kind === "gm" ? gmPois : playerPois;
+  let bestIdx = -1;
+  let bestDistSq = Infinity;
+
+  for (let i = 0; i < targetList.length; i += 1) {
+    const poi = targetList[i];
+    if (poi.q !== h.q || poi.r !== h.r) {
+      continue;
+    }
+    const dx = poi.x - world.x;
+    const dy = poi.y - world.y;
+    const distSq = dx * dx + dy * dy;
+    if (distSq < bestDistSq) {
+      bestDistSq = distSq;
+      bestIdx = i;
+    }
+  }
+
+  if (bestIdx >= 0) {
+    targetList.splice(bestIdx, 1);
+    rebuildUserPoiCaches();
+    saveUserPois();
+  }
+
+  removePinMode = null;
+  syncPinUi();
   updateMeta();
   refreshHoverInfo();
   queueRender();
@@ -1296,47 +1501,80 @@ function loadExploration() {
   }
 }
 
-function savePlayerPins() {
-  localStorage.setItem(PLAYER_PIN_STORAGE_KEY, JSON.stringify(playerPins));
+function saveUserPois() {
+  localStorage.setItem(PLAYER_POI_STORAGE_KEY, JSON.stringify(playerPois));
+  localStorage.setItem(GM_POI_STORAGE_KEY, JSON.stringify(gmPois));
 }
 
-function loadPlayerPins() {
-  const raw = localStorage.getItem(PLAYER_PIN_STORAGE_KEY);
+function loadUserPoisFromKey(storageKey, fallbackPrefix) {
+  const raw = localStorage.getItem(storageKey);
   if (!raw) {
-    playerPins = [];
-    return;
+    return [];
   }
   try {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) {
-      playerPins = [];
-      return;
+      return [];
     }
-    playerPins = parsed
-      .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))
-      .map((p, idx) => ({
-        x: p.x,
-        y: p.y,
-        q: Number.isFinite(p.q) ? p.q : worldToHex(p.x, p.y, hexSizePx()).q,
-        r: Number.isFinite(p.r) ? p.r : worldToHex(p.x, p.y, hexSizePx()).r,
-        label: p.label || makePinLabel(idx + 1),
-        createdAt: p.createdAt || null
-      }));
+    return dedupePoisByHex(
+      parsed
+      .map((item, idx) => buildPoiFromRaw(item, idx, fallbackPrefix))
+      .filter((item) => Boolean(item))
+    );
   } catch {
-    playerPins = [];
+    return [];
   }
 }
 
-function focusMostRecentPin() {
-  if (!playerPins.length) {
-    return false;
+function migrateLegacyPlayerPins() {
+  const legacy = loadUserPoisFromKey(LEGACY_PLAYER_PIN_STORAGE_KEY, "Player Pin");
+  if (legacy.length) {
+    playerPois = legacy;
   }
-  const recent = playerPins[playerPins.length - 1];
-  const zoom = camera.maxZoom;
-  camera.zoom = zoom;
-  camera.panX = viewportW / 2 - recent.x * zoom;
-  camera.panY = viewportH / 2 - recent.y * zoom;
-  return true;
+}
+
+function migrateLegacyGmPin() {
+  const raw = localStorage.getItem(LEGACY_GM_PIN_STORAGE_KEY);
+  if (!raw) {
+    return;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Number.isFinite(parsed.x) || !Number.isFinite(parsed.y)) {
+      return;
+    }
+    const migrated = buildPoiFromRaw(
+      {
+        ...parsed,
+        name: parsed.name || "GM Pin 1",
+        category: "GM Added POI",
+        text: parsed.text || "",
+        url: parsed.url || ""
+      },
+      0,
+      "GM Pin"
+    );
+    gmPois = migrated ? [migrated] : [];
+  } catch {
+    // ignore bad legacy payload
+  }
+}
+
+function loadUserPois() {
+  playerPois = loadUserPoisFromKey(PLAYER_POI_STORAGE_KEY, "Player Pin");
+  gmPois = loadUserPoisFromKey(GM_POI_STORAGE_KEY, "GM Pin");
+
+  if (!playerPois.length) {
+    migrateLegacyPlayerPins();
+  }
+  if (!gmPois.length) {
+    migrateLegacyGmPin();
+  }
+
+  playerPois = dedupePoisByHex(playerPois);
+  gmPois = dedupePoisByHex(gmPois);
+
+  rebuildUserPoiCaches();
 }
 
 function uiStorageKey() {
@@ -1362,23 +1600,33 @@ function loadUiPrefs() {
 }
 
 function updateMeta() {
-  const mode = currentMode().toUpperCase();
-  const pxPerMile = components.scale.pixelsPerMile.toFixed(3);
-  const milesPerPx = components.scale.milesPerPixel.toFixed(6);
-  const hexMiles = HEX_MILES;
-  const size = hexSizePx();
-  const currentLabel = currentHex ? `${currentHex.q},${currentHex.r}` : "none";
-  meta.innerHTML = [
-    `Mode: ${mode}`,
-    `Scale: ${pxPerMile} px/mile (${milesPerPx} miles/px)`,
-    `Hex radius: ${size.toFixed(2)} px`,
-    `Hex center spacing: ${hexMiles} miles`,
-    `Sight: ${SIGHT_RADIUS} hexes`,
-    `Visited: ${visitedHexes.size}`,
-    `Revealed POIs: ${discoveredSpecialHexes.size}`,
-    `Player pins: ${playerPins.length}`,
-    `Current hex: ${currentLabel}`
-  ].join("<br>");
+  if (!meta) {
+    return;
+  }
+  meta.textContent = "";
+}
+
+function syncPinUi() {
+  if (!addPlayerPinButton || !removePlayerPinButton || !addGmPinButton || !removeGmPinButton) {
+    return;
+  }
+  const isGm = currentMode() === "gm";
+  addGmPinButton.style.display = isGm ? "" : "none";
+  removeGmPinButton.style.display = isGm ? "" : "none";
+  if (!isGm) {
+    if (addPinMode === "gm") {
+      addPinMode = null;
+    }
+    if (removePinMode === "gm") {
+      removePinMode = null;
+    }
+  }
+  addPlayerPinButton.textContent =
+    addPinMode === "player" ? "Click map to place player pin" : "Add player pin";
+  removePlayerPinButton.textContent =
+    removePinMode === "player" ? "Click player pin hex to remove" : "Remove player pin";
+  addGmPinButton.textContent = addPinMode === "gm" ? "Click map to place GM pin" : "Add GM pin";
+  removeGmPinButton.textContent = removePinMode === "gm" ? "Click GM pin hex to remove" : "Remove GM pin";
 }
 
 function setupInteractions() {
@@ -1433,8 +1681,14 @@ function setupInteractions() {
       return;
     }
     if (interaction.dragMode === "set-current" && !interaction.moved && event.button === 0) {
-      if (addPinMode) {
-        addPlayerPinAtScreen(event.clientX, event.clientY);
+      if (addPinMode === "player") {
+        addUserPoiAtScreen(event.clientX, event.clientY, "player");
+      } else if (addPinMode === "gm") {
+        addUserPoiAtScreen(event.clientX, event.clientY, "gm");
+      } else if (removePinMode === "player") {
+        removeUserPoiAtScreen(event.clientX, event.clientY, "player");
+      } else if (removePinMode === "gm") {
+        removeUserPoiAtScreen(event.clientX, event.clientY, "gm");
       } else {
         setCurrentHexAtScreen(event.clientX, event.clientY);
       }
@@ -1471,18 +1725,48 @@ function setupInteractions() {
 function setupUi() {
   viewModeSelect.addEventListener("change", () => {
     saveUiPrefs();
+    syncPinUi();
     updateMeta();
     refreshHoverInfo();
     queueRender();
   });
 
-  showHexInput.addEventListener("change", queueRender);
   showMarkersInput.addEventListener("change", queueRender);
 
   resetViewButton.addEventListener("click", fitView);
-  addPinButton.addEventListener("click", () => {
-    addPinMode = !addPinMode;
-    addPinButton.textContent = addPinMode ? "Click map to place pin" : "Add player pin";
+  addPlayerPinButton.addEventListener("click", () => {
+    addPinMode = addPinMode === "player" ? null : "player";
+    if (addPinMode === "player") {
+      removePinMode = null;
+    }
+    syncPinUi();
+  });
+  removePlayerPinButton.addEventListener("click", () => {
+    removePinMode = removePinMode === "player" ? null : "player";
+    if (removePinMode === "player") {
+      addPinMode = null;
+    }
+    syncPinUi();
+  });
+  addGmPinButton.addEventListener("click", () => {
+    if (currentMode() !== "gm") {
+      return;
+    }
+    addPinMode = addPinMode === "gm" ? null : "gm";
+    if (addPinMode === "gm") {
+      removePinMode = null;
+    }
+    syncPinUi();
+  });
+  removeGmPinButton.addEventListener("click", () => {
+    if (currentMode() !== "gm") {
+      return;
+    }
+    removePinMode = removePinMode === "gm" ? null : "gm";
+    if (removePinMode === "gm") {
+      addPinMode = null;
+    }
+    syncPinUi();
   });
 
   clearFogButton.addEventListener("click", () => {
@@ -1502,10 +1786,13 @@ function setupUi() {
     visitedHexes = new Set();
     discoveredSpecialHexes = new Set();
     currentHex = null;
-    playerPins = [];
-    savePlayerPins();
-    addPinMode = false;
-    addPinButton.textContent = "Add player pin";
+    playerPois = [];
+    gmPois = [];
+    rebuildUserPoiCaches();
+    saveUserPois();
+    addPinMode = null;
+    removePinMode = null;
+    syncPinUi();
     saveExploration();
     updateMeta();
     refreshHoverInfo();
@@ -1585,16 +1872,17 @@ async function boot() {
   setupUi();
   loadUiPrefs();
   loadExploration();
-  loadPlayerPins();
+  loadUserPois();
   clearClassificationCaches();
-  if (!focusMostRecentPin()) {
-    fitView();
-  }
+  syncPinUi();
+  fitView();
   updateMeta();
   queueRender();
 }
 
 boot().catch((error) => {
   console.error(error);
-  meta.textContent = `Failed to load data: ${error.message}`;
+  if (meta) {
+    meta.textContent = `Failed to load data: ${error.message}`;
+  }
 });

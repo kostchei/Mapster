@@ -12,10 +12,6 @@
       <strong>Faerun Hex Explore</strong>
     </div>
     <div class="row">
-      <span>Hex size</span>
-      <strong>6 miles (fixed)</strong>
-    </div>
-    <div class="row">
       <label for="viewMode">View mode</label>
       <select id="viewMode">
         <option value="player">Player</option>
@@ -27,20 +23,18 @@
       <strong>3 hexes</strong>
     </div>
     <div class="row">
-      <label for="showHex">Show grid</label>
-      <input id="showHex" type="checkbox" checked>
-    </div>
-    <div class="row">
       <label for="showMarkers">Show markers</label>
       <input id="showMarkers" type="checkbox" checked>
     </div>
     <div class="row buttons">
       <button id="resetView">Reset view</button>
-      <button id="addPin">Add player pin</button>
+      <button id="addPlayerPin">Add player pin</button>
+      <button id="removePlayerPin">Remove player pin</button>
+      <button id="addGmPin">Add GM pin</button>
+      <button id="removeGmPin">Remove GM pin</button>
       <button id="clearFog">Clear trail</button>
       <button id="resetFog">Reset explore</button>
     </div>
-    <div id="meta"></div>
     <div id="hint">Left click: set current hex. Hover marker hex: show metadata. Right drag: pan. Mouse wheel: zoom.</div>
   </div>
 
