@@ -32,7 +32,7 @@
     </div>
     <div class="row">
       <label for="showMarkers">Show markers</label>
-      <input id="showMarkers" type="checkbox">
+      <input id="showMarkers" type="checkbox" checked>
     </div>
     <div class="row buttons">
       <button id="resetView">Reset view</button>
@@ -41,10 +41,11 @@
       <button id="resetFog">Reset explore</button>
     </div>
     <div id="meta"></div>
-    <div id="hint">Left click: set current hex. Right drag: pan. Mouse wheel: zoom.</div>
+    <div id="hint">Left click: set current hex. Hover marker hex: show metadata. Right drag: pan. Mouse wheel: zoom.</div>
   </div>
 
   <canvas id="mapCanvas"></canvas>
+  <div id="hoverInfo" aria-live="polite"></div>
   <script src="./main.js" type="module"></script>
 </body>
 </html>

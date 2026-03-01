@@ -20,6 +20,7 @@ const addPinButton = document.getElementById("addPin");
 const clearFogButton = document.getElementById("clearFog");
 const resetFogButton = document.getElementById("resetFog");
 const meta = document.getElementById("meta");
+const hoverInfo = document.getElementById("hoverInfo");
 
 const SUBHEX_SLOTS = ["nw", "n", "ne", "sw", "c", "se", "s"];
 
@@ -97,6 +98,7 @@ const CITY_ICON_URLS = [
   "../Examples/Hexs/bw town.png",
   "../Examples/Hexs/bw town large.png",
   "../Examples/Hexs/bw city hill.png",
+  "../Examples/Hexs/bw city tower magic.png",
   "../Examples/Hexs/bw village farm.png"
 ];
 
@@ -143,10 +145,17 @@ let viewportH = window.innerHeight;
 let visitedHexes = new Set();
 let currentHex = null;
 let markerOverrideCache = new Map();
+let markerHexCache = new Map();
 let terrainTypeCache = new Map();
 let renderQueued = false;
 let playerPins = [];
 let addPinMode = false;
+let discoveredSpecialHexes = new Set();
+const hoverState = {
+  inside: false,
+  screenX: 0,
+  screenY: 0
+};
 
 function currentMode() {
   return viewModeSelect.value === "gm" ? "gm" : "player";
@@ -304,6 +313,31 @@ function buildVisibleSet() {
   return set;
 }
 
+function revealFromHex(hex) {
+  for (let dq = -SIGHT_RADIUS; dq <= SIGHT_RADIUS; dq += 1) {
+    for (let dr = -SIGHT_RADIUS; dr <= SIGHT_RADIUS; dr += 1) {
+      if (hexDistance(dq, dr) <= SIGHT_RADIUS) {
+        visitedHexes.add(hexKey(hex.q + dq, hex.r + dr));
+      }
+    }
+  }
+}
+
+function markSpecialHexesFromCenter(hex) {
+  for (let dq = -SIGHT_RADIUS; dq <= SIGHT_RADIUS; dq += 1) {
+    for (let dr = -SIGHT_RADIUS; dr <= SIGHT_RADIUS; dr += 1) {
+      if (hexDistance(dq, dr) > SIGHT_RADIUS) {
+        continue;
+      }
+      const key = hexKey(hex.q + dq, hex.r + dr);
+      const t = markerOverrideCache.get(key);
+      if (t === "city" || t === "dungeon") {
+        discoveredSpecialHexes.add(key);
+      }
+    }
+  }
+}
+
 function parseCategory(category) {
   const c = String(category || "").toLowerCase();
   if (c.includes("city") || c.includes("town")) {
@@ -321,24 +355,142 @@ function parseCategory(category) {
   return null;
 }
 
+function htmlToPlainText(html) {
+  if (!html) {
+    return "";
+  }
+  const normalized = String(html)
+    .replaceAll("<%>", "</p><p>")
+    .replace(/<\/p>/gi, "</p>\n");
+  const div = document.createElement("div");
+  div.innerHTML = normalized;
+  return (div.textContent || "")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
 function rebuildMarkerOverrideCache() {
   markerOverrideCache = new Map();
+  markerHexCache = new Map();
   const size = hexSizePx();
   for (const marker of components.markers) {
-    const markerType = parseCategory(marker.category);
-    if (!markerType) {
+    if (!Number.isFinite(marker.x) || !Number.isFinite(marker.y)) {
       continue;
     }
+    const markerType = parseCategory(marker.category);
     const h = worldToHex(marker.x, marker.y, size);
     const key = hexKey(h.q, h.r);
-    const existing = markerOverrideCache.get(key);
-    if (existing === "city") {
-      continue;
-    }
-    if (!existing || markerType === "city") {
-      markerOverrideCache.set(key, markerType);
+    const existingMarkers = markerHexCache.get(key) || [];
+    existingMarkers.push({
+      name: marker.name || "Unnamed marker",
+      category: marker.category || "Uncategorized",
+      text: htmlToPlainText(marker.textHtml || marker.imageHtml || "")
+    });
+    markerHexCache.set(key, existingMarkers);
+
+    if (markerType) {
+      const existing = markerOverrideCache.get(key);
+      if (existing === "city") {
+        continue;
+      }
+      if (!existing || markerType === "city") {
+        markerOverrideCache.set(key, markerType);
+      }
     }
   }
+}
+
+function escapeHtml(text) {
+  return String(text)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function hideHoverInfo() {
+  hoverInfo.style.display = "none";
+  hoverInfo.innerHTML = "";
+}
+
+function updateHoverInfoAtScreen(sx, sy) {
+  if (!hoverState.inside) {
+    hideHoverInfo();
+    return;
+  }
+
+  const world = screenToWorld(sx, sy);
+  if (
+    world.x < 0 ||
+    world.y < 0 ||
+    world.x > components.map.imageW ||
+    world.y > components.map.imageH ||
+    !isInsideSubmap(world.x, world.y)
+  ) {
+    hideHoverInfo();
+    return;
+  }
+
+  const h = worldToHex(world.x, world.y, hexSizePx());
+  const key = hexKey(h.q, h.r);
+  const markers = markerHexCache.get(key) || [];
+  if (!markers.length) {
+    hideHoverInfo();
+    return;
+  }
+
+  if (currentMode() === "player") {
+    const visibleSet = buildVisibleSet();
+    const isKnown = visitedHexes.has(key) || visibleSet.has(key);
+    if (!isKnown) {
+      hideHoverInfo();
+      return;
+    }
+  }
+
+  const rows = markers
+    .map((marker) => {
+      return [
+        `<div class="row">`,
+        `<div class="name">${escapeHtml(marker.name)}</div>`,
+        `<div class="cat">${escapeHtml(marker.category)}</div>`,
+        `</div>`
+      ].join("");
+    })
+    .join("");
+
+  hoverInfo.innerHTML = rows;
+  hoverInfo.style.display = "block";
+
+  const rect = hoverInfo.getBoundingClientRect();
+  const margin = 10;
+  let left = sx + 14;
+  let top = sy + 14;
+
+  if (left + rect.width + margin > viewportW) {
+    left = sx - rect.width - 14;
+  }
+  if (top + rect.height + margin > viewportH) {
+    top = sy - rect.height - 14;
+  }
+
+  left = Math.max(margin, Math.min(viewportW - rect.width - margin, left));
+  top = Math.max(margin, Math.min(viewportH - rect.height - margin, top));
+
+  hoverInfo.style.left = `${left}px`;
+  hoverInfo.style.top = `${top}px`;
+}
+
+function refreshHoverInfo() {
+  if (!hoverState.inside) {
+    hideHoverInfo();
+    return;
+  }
+  updateHoverInfoAtScreen(hoverState.screenX, hoverState.screenY);
 }
 
 function clearClassificationCaches() {
@@ -911,15 +1063,9 @@ function drawTerrainHexes(bounds, visibleSet, mode) {
 }
 
 function drawMarkers(bounds, visibleSet, mode) {
-  if (!showMarkersInput.checked) {
-    return;
-  }
-
+  const showMarkerDots = showMarkersInput.checked;
   const size = hexSizePx();
-  ctx.fillStyle = "#fff";
-  ctx.strokeStyle = "#111";
-  ctx.lineWidth = 1 / camera.zoom;
-  ctx.font = `${14 / camera.zoom}px Georgia, serif`;
+  ctx.font = `700 ${14 / camera.zoom}px Georgia, serif`;
 
   for (const marker of components.markers) {
     if (marker.x < bounds.xMin || marker.x > bounds.xMax || marker.y < bounds.yMin || marker.y > bounds.yMax) {
@@ -931,21 +1077,32 @@ function drawMarkers(bounds, visibleSet, mode) {
 
     if (mode === "player") {
       const mh = worldToHex(marker.x, marker.y, size);
-      if (!visibleSet.has(hexKey(mh.q, mh.r))) {
+      const key = hexKey(mh.q, mh.r);
+      if (!visibleSet.has(key) && !visitedHexes.has(key)) {
         continue;
       }
     }
 
-    ctx.beginPath();
-    ctx.arc(marker.x, marker.y, 3.2 / camera.zoom, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-
-    if (camera.zoom > 0.34) {
-      ctx.fillStyle = "#8b4a32";
-      ctx.fillText(marker.name, marker.x + 7 / camera.zoom, marker.y - 7 / camera.zoom);
+    if (showMarkerDots) {
+      ctx.beginPath();
+      ctx.arc(marker.x, marker.y, 3.2 / camera.zoom, 0, Math.PI * 2);
       ctx.fillStyle = "#fff";
+      ctx.strokeStyle = "#111";
+      ctx.lineWidth = 1 / camera.zoom;
+      ctx.fill();
+      ctx.stroke();
     }
+
+    const tx = marker.x + 7 / camera.zoom;
+    const ty = marker.y - 7 / camera.zoom;
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 3.2 / camera.zoom;
+    ctx.lineJoin = "round";
+    ctx.miterLimit = 2;
+    ctx.strokeText(marker.name, tx, ty);
+
+    ctx.fillStyle = "#6b2f20";
+    ctx.fillText(marker.name, tx, ty);
   }
 }
 
@@ -1048,9 +1205,11 @@ function setCurrentHexAtScreen(sx, sy) {
   }
   const hex = worldToHex(world.x, world.y, hexSizePx());
   currentHex = hex;
-  visitedHexes.add(hexKey(hex.q, hex.r));
+  revealFromHex(hex);
+  markSpecialHexesFromCenter(hex);
   saveExploration();
   updateMeta();
+  refreshHoverInfo();
   queueRender();
 }
 
@@ -1083,12 +1242,14 @@ function addPlayerPinAtScreen(sx, sy) {
   savePlayerPins();
 
   currentHex = { q: h.q, r: h.r };
-  visitedHexes.add(hexKey(h.q, h.r));
+  revealFromHex(currentHex);
+  markSpecialHexesFromCenter(currentHex);
   saveExploration();
 
   addPinMode = false;
   addPinButton.textContent = "Add player pin";
   updateMeta();
+  refreshHoverInfo();
   queueRender();
 }
 
@@ -1097,7 +1258,11 @@ function explorationStorageKey() {
 }
 
 function saveExploration() {
-  const payload = { visited: Array.from(visitedHexes), currentHex };
+  const payload = {
+    visited: Array.from(visitedHexes),
+    currentHex,
+    discoveredSpecial: Array.from(discoveredSpecialHexes)
+  };
   localStorage.setItem(explorationStorageKey(), JSON.stringify(payload));
 }
 
@@ -1111,12 +1276,22 @@ function loadExploration() {
   try {
     const parsed = JSON.parse(raw);
     visitedHexes = new Set(parsed.visited || []);
+    discoveredSpecialHexes = new Set(parsed.discoveredSpecial || []);
+    if (discoveredSpecialHexes.size === 0 && visitedHexes.size > 0) {
+      for (const key of visitedHexes) {
+        const t = markerOverrideCache.get(key);
+        if (t === "city" || t === "dungeon") {
+          discoveredSpecialHexes.add(key);
+        }
+      }
+    }
     currentHex =
       parsed.currentHex && Number.isInteger(parsed.currentHex.q) && Number.isInteger(parsed.currentHex.r)
         ? parsed.currentHex
         : null;
   } catch {
     visitedHexes = new Set();
+    discoveredSpecialHexes = new Set();
     currentHex = null;
   }
 }
@@ -1200,6 +1375,7 @@ function updateMeta() {
     `Hex center spacing: ${hexMiles} miles`,
     `Sight: ${SIGHT_RADIUS} hexes`,
     `Visited: ${visitedHexes.size}`,
+    `Revealed POIs: ${discoveredSpecialHexes.size}`,
     `Player pins: ${playerPins.length}`,
     `Current hex: ${currentLabel}`
   ].join("<br>");
@@ -1207,6 +1383,10 @@ function updateMeta() {
 
 function setupInteractions() {
   canvas.addEventListener("contextmenu", (event) => event.preventDefault());
+  canvas.addEventListener("mouseleave", () => {
+    hoverState.inside = false;
+    hideHoverInfo();
+  });
 
   canvas.addEventListener("mousedown", (event) => {
     interaction.dragging = true;
@@ -1217,7 +1397,20 @@ function setupInteractions() {
   });
 
   window.addEventListener("mousemove", (event) => {
+    const overCanvas = event.target === canvas;
+    if (overCanvas) {
+      hoverState.inside = true;
+      hoverState.screenX = event.clientX;
+      hoverState.screenY = event.clientY;
+    } else if (!interaction.dragging) {
+      hoverState.inside = false;
+      hideHoverInfo();
+    }
+
     if (!interaction.dragging) {
+      if (overCanvas) {
+        updateHoverInfoAtScreen(event.clientX, event.clientY);
+      }
       return;
     }
     const dx = event.clientX - interaction.startX;
@@ -1226,6 +1419,7 @@ function setupInteractions() {
       interaction.moved = true;
     }
     if (interaction.dragMode === "pan") {
+      hideHoverInfo();
       camera.panX += dx;
       camera.panY += dy;
       interaction.startX = event.clientX;
@@ -1244,6 +1438,8 @@ function setupInteractions() {
       } else {
         setCurrentHexAtScreen(event.clientX, event.clientY);
       }
+    } else {
+      refreshHoverInfo();
     }
     interaction.dragging = false;
     interaction.dragMode = "none";
@@ -1259,6 +1455,7 @@ function setupInteractions() {
       camera.zoom = nextZoom;
       camera.panX = event.clientX - worldBefore.x * camera.zoom;
       camera.panY = event.clientY - worldBefore.y * camera.zoom;
+      refreshHoverInfo();
       queueRender();
     },
     { passive: false }
@@ -1267,6 +1464,7 @@ function setupInteractions() {
   window.addEventListener("resize", () => {
     resizeCanvas();
     fitView();
+    refreshHoverInfo();
   });
 }
 
@@ -1274,6 +1472,7 @@ function setupUi() {
   viewModeSelect.addEventListener("change", () => {
     saveUiPrefs();
     updateMeta();
+    refreshHoverInfo();
     queueRender();
   });
 
@@ -1288,16 +1487,20 @@ function setupUi() {
 
   clearFogButton.addEventListener("click", () => {
     visitedHexes = new Set();
+    discoveredSpecialHexes = new Set();
     if (currentHex) {
-      visitedHexes.add(hexKey(currentHex.q, currentHex.r));
+      revealFromHex(currentHex);
+      markSpecialHexesFromCenter(currentHex);
     }
     saveExploration();
     updateMeta();
+    refreshHoverInfo();
     queueRender();
   });
 
   resetFogButton.addEventListener("click", () => {
     visitedHexes = new Set();
+    discoveredSpecialHexes = new Set();
     currentHex = null;
     playerPins = [];
     savePlayerPins();
@@ -1305,6 +1508,7 @@ function setupUi() {
     addPinButton.textContent = "Add player pin";
     saveExploration();
     updateMeta();
+    refreshHoverInfo();
     queueRender();
   });
 }
