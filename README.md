@@ -2,6 +2,39 @@
 
 This project extracts AideDD Faerun map components, then runs a black-and-white flat-top hex explorer prototype with fog of war.
 
+## Fastest Setup (Windows LAN)
+
+Use this when the GM hosts on a Windows laptop and players (phones/tablets/laptops/smart TV) open it on the same Wi-Fi.
+
+1. Optional one-time desktop shortcut:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\deploy\windows\Install-Desktop-Shortcut.ps1
+```
+
+2. Start hosting (either method):
+
+- Double-click desktop shortcut `Start Mapster LAN`
+- Or run:
+
+```powershell
+.\deploy\windows\Start-Mapster-LAN.cmd
+```
+
+3. Open on GM laptop:
+
+- `http://localhost:8080/prototype/`
+
+4. Open on player devices / smart TV:
+
+- `http://<laptop-ip>:8080/prototype/`
+
+Notes:
+
+- Keep the launcher window open while hosting.
+- First run may prompt for firewall access; allow on Private networks.
+- Browser state (`localStorage`) is per-device.
+
 ## What The Source Code Says About Scale
 
 From `dataF.js`:
