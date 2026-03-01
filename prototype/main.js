@@ -1094,6 +1094,30 @@ function drawTypedTerrain(corners, center, size, type, q, r, state) {
   drawClippedImage(corners, img, center, size, alpha);
 }
 
+function drawHexEdgeFeather(corners, size, intensity = 1) {
+  const hexScreenRadius = size * camera.zoom;
+  const outerBandScreen = Math.max(1.6, hexScreenRadius * 0.20);
+  const innerBandScreen = Math.max(1.0, hexScreenRadius * 0.10);
+  const outerBand = outerBandScreen / camera.zoom;
+  const innerBand = innerBandScreen / camera.zoom;
+
+  ctx.save();
+  beginPathFromPoints(corners);
+  ctx.clip();
+
+  beginPathFromPoints(corners);
+  ctx.strokeStyle = `rgba(255,255,255,${0.22 * intensity})`;
+  ctx.lineWidth = outerBand * 2;
+  ctx.stroke();
+
+  beginPathFromPoints(corners);
+  ctx.strokeStyle = `rgba(255,255,255,${0.34 * intensity})`;
+  ctx.lineWidth = innerBand * 2;
+  ctx.stroke();
+
+  ctx.restore();
+}
+
 function drawGridStroke(corners, state, mode) {
   beginPathFromPoints(corners);
   ctx.strokeStyle = "#787878";
@@ -1150,6 +1174,7 @@ function drawTerrainHexes(bounds, visibleSet, mode) {
 
       const type = classifyHexType(q, r);
       drawTypedTerrain(corners, center, size, type, q, r, state);
+      drawHexEdgeFeather(corners, size, state === "visited" ? 0.6 : 1);
       drawGridStroke(corners, state, mode);
     }
   }
@@ -1230,8 +1255,15 @@ function drawUserPoi(poi, fillColor, strokeColor, labelColor) {
   ctx.strokeStyle = strokeColor;
   ctx.stroke();
 
+  const tx = poi.x + 9 / camera.zoom;
+  const ty = poi.y - 8 / camera.zoom;
+  ctx.strokeStyle = "#fff";
+  ctx.lineWidth = 3 / camera.zoom;
+  ctx.lineJoin = "round";
+  ctx.miterLimit = 2;
+  ctx.strokeText(poi.name, tx, ty);
   ctx.fillStyle = labelColor;
-  ctx.fillText(poi.name, poi.x + 9 / camera.zoom, poi.y - 8 / camera.zoom);
+  ctx.fillText(poi.name, tx, ty);
   ctx.restore();
 }
 
